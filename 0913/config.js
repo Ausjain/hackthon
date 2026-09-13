@@ -2,7 +2,7 @@
  * 지역 변경은 이 파일의 region 값만 수정하면 됩니다.
  * bounds 순서: 남쪽(south), 서쪽(west), 북쪽(north), 동쪽(east)
  */
-window.APP_CONFIG = {
+const APP_CONFIG = {
   app: {
     titleSuffix: '한마디 지도',
     subtitle: '우리 동네를 더 좋은 곳으로',
@@ -32,15 +32,20 @@ window.APP_CONFIG = {
     countryCode: 'kr'
   },
   map: {
-    tileUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    provider: 'google',
+    mapTypeId: 'roadmap'
   },
   search: {
-    endpoint: 'https://nominatim.openstreetmap.org/search',
+    provider: 'googlePlaces',
+    endpoint: '/api/places/search-text',
     debounceMs: 500,
     minRequestIntervalMs: 1100,
     requestLimit: 8,
     displayLimit: 5,
-    language: 'ko'
+    language: 'ko',
+    regionCode: 'KR'
   }
 };
+
+if (typeof window !== 'undefined') window.APP_CONFIG = APP_CONFIG;
+if (typeof module !== 'undefined') module.exports = APP_CONFIG;

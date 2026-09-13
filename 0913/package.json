@@ -1,0 +1,10 @@
+{
+  "name": "local-voice-map",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check app.js && node --check config.js && node --check server.js"
+  },
+  "engines": { "node": ">=18" }
+}

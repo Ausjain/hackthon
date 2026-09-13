@@ -1,18 +1,22 @@
 # 은평 한마디 지도
 
-은평구 학생들이 지도 위 장소에 의견을 남기는 1차 로컬 버전입니다.
+여행지와 생활 장소를 검색하고 개인 핀과 메모를 남기는 로컬 웹앱입니다. 기본 지역은 은평구이며 설정으로 다른 지역으로 변경할 수 있습니다.
 
 ## 실행
 
-`0913` 폴더에서 아래 명령을 실행한 뒤 브라우저에서 `http://localhost:4173`을 엽니다.
+Google Cloud에서 **Maps JavaScript API**와 **Places API (New)**를 활성화하고 결제 계정을 연결합니다. `.env.example`을 `.env`로 복사한 뒤 두 API 키를 설정합니다.
 
 ```powershell
-python -m http.server 4173
+Copy-Item .env.example .env
+# .env에 실제 키 입력
+node server.js
 ```
 
-Leaflet과 OpenStreetMap 타일을 CDN에서 불러오므로 지도 표시에는 인터넷 연결이 필요합니다. 등록한 핀은 별도 데이터베이스가 아닌 현재 브라우저의 `localStorage`에만 저장됩니다.
+브라우저에서 `http://127.0.0.1:4173`을 엽니다. 외부 패키지 설치는 필요하지 않습니다.
 
-장소 검색은 공개 Nominatim 검색 API를 사용합니다. 검색 버튼 또는 Enter로 요청하며, 요청 간격 제한과 동일 검색어 캐시가 적용됩니다. 공개 서비스의 [사용 정책](https://operations.osmfoundation.org/policies/nominatim/)에 따라 자동완성 방식의 연속 검색은 사용하지 않습니다.
+장소 검색은 Google Places API (New)의 Text Search를 사용합니다. 서버가 `.env`의 `GOOGLE_PLACES_API_KEY`로 요청하고 브라우저에는 이 키를 보내지 않습니다. 지도용 `GOOGLE_MAPS_BROWSER_KEY`는 소스 코드에는 저장되지 않지만 Google Maps JavaScript를 로드하기 위해 브라우저에 전달되므로, Google Cloud에서 허용 HTTP 리퍼러와 Maps JavaScript API로 반드시 제한해야 합니다. 서버 키도 Places API (New) 및 서버 IP로 제한하는 것을 권장합니다.
+
+등록한 핀과 메모는 데이터베이스 없이 현재 브라우저의 `localStorage`에 저장됩니다. Google 검색으로 선택한 장소는 Place ID를 기준으로 동일 장소를 판별하므로, 같은 장소를 다시 선택하면 기존 핀에 새 의견이 추가됩니다. 과거 단일 의견 핀 데이터도 실행 시 여러 의견 구조로 자동 변환됩니다. Google 검색 결과 중 장기 저장이 허용되는 Place ID와 사용자가 직접 저장한 장소명·좌표·메모만 핀에 보관합니다.
 
 ## 지역 설정 변경
 
@@ -26,6 +30,6 @@ Leaflet과 OpenStreetMap 타일을 CDN에서 불러오므로 지도 표시에는
 - `searchResultZoom`: 검색 결과를 선택했을 때의 줌
 - `searchQuerySuffix`: 검색어 뒤에 붙일 행정구역
 - `searchAliases`: 검색 결과가 해당 지역인지 확인할 명칭 목록
-- `countryCode`: Nominatim 국가 제한 코드
+- `countryCode`: 지역 국가 코드
 
 핀과 의견은 `storageKeyPrefix + region.id`로 분리 저장됩니다. 카테고리, 의견 작성, 지도 검색 로직에는 특정 지역명이 포함되지 않습니다.
