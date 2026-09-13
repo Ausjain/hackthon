@@ -16,7 +16,7 @@ node server.js
 
 장소 검색은 Google Places API (New)의 Text Search를 사용합니다. 서버가 `.env`의 `GOOGLE_PLACES_API_KEY`로 요청하고 브라우저에는 이 키를 보내지 않습니다. 지도용 `GOOGLE_MAPS_BROWSER_KEY`는 소스 코드에는 저장되지 않지만 Google Maps JavaScript를 로드하기 위해 브라우저에 전달되므로, Google Cloud에서 허용 HTTP 리퍼러와 Maps JavaScript API로 반드시 제한해야 합니다. 서버 키도 Places API (New) 및 서버 IP로 제한하는 것을 권장합니다.
 
-등록한 핀과 메모는 데이터베이스 없이 현재 브라우저의 `localStorage`에 저장됩니다. Google 검색으로 선택한 장소는 Place ID를 기준으로 동일 장소를 판별하므로, 같은 장소를 다시 선택하면 기존 핀에 새 의견이 추가됩니다. 과거 단일 의견 핀 데이터도 실행 시 여러 의견 구조로 자동 변환됩니다. Google 검색 결과 중 장기 저장이 허용되는 Place ID와 사용자가 직접 저장한 장소명·좌표·메모만 핀에 보관합니다.
+등록한 핀, 좋아요·불편해요 반응과 댓글은 데이터베이스 없이 현재 브라우저의 `localStorage`에 저장됩니다. Google 검색으로 선택한 장소는 Place ID를 기준으로 동일 장소를 판별하므로, 같은 장소를 다시 선택하면 기존 상세창이 열립니다. 과거 분류형 의견 데이터는 실행 시 반응 수와 댓글 구조로 자동 변환됩니다. Google 검색 결과 중 장기 저장이 허용되는 Place ID와 사용자가 직접 저장한 장소명·좌표·댓글만 핀에 보관합니다.
 
 ## 지역 설정 변경
 
@@ -32,7 +32,7 @@ node server.js
 - `searchAliases`: 검색 결과가 해당 지역인지 확인할 명칭 목록
 - `countryCode`: 지역 국가 코드
 
-핀과 의견은 `storageKeyPrefix + region.id`로 분리 저장됩니다. 카테고리, 의견 작성, 지도 검색 로직에는 특정 지역명이 포함되지 않습니다.
+핀과 댓글은 `storageKeyPrefix + region.id`로 분리 저장됩니다. 반응, 댓글 작성, 지도 검색 로직에는 특정 지역명이 포함되지 않습니다.
 
 ## Vercel 배포
 

@@ -5,12 +5,6 @@
   if (!config?.region?.center || !config?.region?.bounds) throw new Error('config.js에 유효한 지역 설정이 필요합니다.');
   const { app: appConfig, region, map: mapConfig, search: searchConfig } = config;
   const STORAGE_KEY = `${appConfig.storageKeyPrefix}:${region.id}`;
-  const categoryMeta = {
-    '좋아요': { className:'like', symbol:'♥', countId:'likeCount', color:'#cb4f61' },
-    '불편해요': { className:'inconvenient', symbol:'!', countId:'inconvenientCount', color:'#d78327' },
-    '추천해요': { className:'recommend', symbol:'★', countId:'recommendCount', color:'#39705f' },
-    '바뀌었으면 해요': { className:'change', symbol:'↻', countId:'changeCount', color:'#6a61a9' }
-  };
 
   applyRegionConfig();
   await loadGoogleMaps();
@@ -33,7 +27,6 @@
   const opinion = document.querySelector('#opinion');
   let selectedLatLng = null;
   let selectedPlaceId = null;
-  let activeCategory = '전체';
   let places = loadPlaces();
   let pinMarkers = [];
   let searchMarker = null;
@@ -84,83 +77,132 @@
       }
       const value = JSON.parse(storedValue || '[]');
       if (!Array.isArray(value)) return [];
-      return value.map(place => {
-        if (Array.isArray(place.opinions)) return { ...place, placeId:place.placeId || place.sourcePlaceId || null };
-        return {
-          id:place.id,
-          placeId:place.placeId || place.sourcePlaceId || null,
-          lat:place.lat,
-          lng:place.lng,
-          placeName:place.placeName,
-          opinions:[{
-            id:`${place.id}-opinion`,
-            text:place.opinion || '',
-            category:place.category || '좋아요',
-            createdAt:place.createdAt || null
-          }]
-        };
-      });
+      return value.map(place => normalizePlace(place));
     } catch (_) { return []; }
   }
 
+  function normalizePlace(place) {
+    const oldOpinions = Array.isArray(place.opinions)
+      ? place.opinions
+      : [{ id:`${place.id}-opinion`, text:place.opinion || '', category:place.category, createdAt:place.createdAt || null }];
+    return {
+      id:place.id,
+      placeId:place.placeId || place.sourcePlaceId || null,
+      lat:place.lat,
+      lng:place.lng,
+      placeName:place.placeName,
+      reactions:place.reactions || {
+        like:oldOpinions.filter(item => item.category === '좋아요').length,
+        dislike:oldOpinions.filter(item => item.category === '불편해요').length
+      },
+      comments:Array.isArray(place.comments) ? place.comments : oldOpinions.filter(item => item.text?.trim()).map(item => ({
+        id:item.id,
+        text:item.text.trim(),
+        createdAt:item.createdAt || null
+      }))
+    };
+  }
+
   function savePlaces() { localStorage.setItem(STORAGE_KEY, JSON.stringify(places)); }
+  function createId(suffix = '') {
+    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    return suffix ? `${id}-${suffix}` : id;
+  }
   function insideRegion(position) {
     const { lat, lng } = position;
     return lat >= region.bounds.south && lat <= region.bounds.north && lng >= region.bounds.west && lng <= region.bounds.east;
   }
 
   function markerOptions(place) {
-    const visibleOpinions = activeCategory === '전체' ? place.opinions : place.opinions.filter(opinionItem => opinionItem.category === activeCategory);
-    const markerCategory = visibleOpinions.at(-1)?.category || place.opinions.at(-1)?.category || '좋아요';
-    const meta = categoryMeta[markerCategory];
     return {
       position: { lat:Number(place.lat), lng:Number(place.lng) },
       map,
       title: place.placeName,
-      icon: { path:google.maps.SymbolPath.CIRCLE, scale:18, fillColor:meta.color, fillOpacity:1, strokeColor:'#ffffff', strokeWeight:4 },
-      label: { text:meta.symbol, color:'#ffffff', fontSize:'14px', fontWeight:'700' }
+      icon: { path:google.maps.SymbolPath.CIRCLE, scale:16, fillColor:'#ee6b3b', fillOpacity:1, strokeColor:'#ffffff', strokeWeight:4 },
+      label: { text:'●', color:'#ffffff', fontSize:'10px', fontWeight:'700' }
     };
   }
 
   function renderPins() {
     pinMarkers.forEach(marker => marker.setMap(null));
     pinMarkers = [];
-    places.filter(place => activeCategory === '전체' || place.opinions.some(opinionItem => opinionItem.category === activeCategory)).forEach(place => {
+    places.forEach(place => {
       const marker = new google.maps.Marker(markerOptions(place));
-      marker.addListener('click', () => {
-        const content = document.createElement('div');
-        content.className = 'google-info-content';
-        const title = document.createElement('h3');
-        title.className = 'popup-place';
-        title.textContent = place.placeName;
-        content.append(title);
-        place.opinions.filter(opinionItem => activeCategory === '전체' || opinionItem.category === activeCategory).forEach(opinionItem => {
-          const opinionCard = document.createElement('div');
-          const category = document.createElement('span');
-          const memo = document.createElement('p');
-          opinionCard.className = 'popup-opinion-card';
-          category.className = 'popup-category';
-          memo.className = 'popup-opinion';
-          category.textContent = opinionItem.category;
-          memo.textContent = opinionItem.text;
-          opinionCard.append(category, memo);
-          content.append(opinionCard);
-        });
-        infoWindow.setContent(content);
-        infoWindow.open({ map, anchor:marker });
-      });
+      marker.placeRecordId = place.id;
+      marker.addListener('click', () => openPlaceDetail(place, marker));
       pinMarkers.push(marker);
     });
     updateCounts();
   }
 
   function updateCounts() {
-    const opinionCount = places.reduce((total, place) => total + place.opinions.length, 0);
-    document.querySelector('#pinCount').textContent = opinionCount;
-    document.querySelector('#allCount').textContent = opinionCount;
-    Object.entries(categoryMeta).forEach(([category, meta]) => {
-      document.querySelector(`#${meta.countId}`).textContent = places.reduce((total, place) => total + place.opinions.filter(opinionItem => opinionItem.category === category).length, 0);
+    document.querySelector('#pinCount').textContent = places.length;
+  }
+
+  function openPlaceDetail(place, marker) {
+    const content = document.createElement('div');
+    const title = document.createElement('h3');
+    const reactions = document.createElement('div');
+    const likeButton = createReactionButton('👍', '좋아요', place.reactions.like, 'like');
+    const dislikeButton = createReactionButton('👎', '불편해요', place.reactions.dislike, 'dislike');
+    const commentsTitle = document.createElement('strong');
+    const commentsList = document.createElement('div');
+    const commentForm = document.createElement('form');
+    const commentInput = document.createElement('textarea');
+    const commentButton = document.createElement('button');
+    content.className = 'place-detail';
+    title.className = 'popup-place';
+    title.textContent = place.placeName;
+    reactions.className = 'reaction-row';
+    commentsTitle.className = 'comments-title';
+    commentsTitle.textContent = `댓글 ${place.comments.length}개`;
+    commentsList.className = 'comment-list';
+    if (place.comments.length) {
+      place.comments.forEach(comment => {
+        const item = document.createElement('p');
+        item.className = 'comment-item';
+        item.textContent = comment.text;
+        commentsList.append(item);
+      });
+    } else {
+      const empty = document.createElement('p');
+      empty.className = 'comment-empty';
+      empty.textContent = '아직 댓글이 없어요. 첫 댓글을 남겨보세요!';
+      commentsList.append(empty);
+    }
+    commentForm.className = 'comment-form';
+    commentInput.maxLength = 200;
+    commentInput.required = true;
+    commentInput.rows = 2;
+    commentInput.placeholder = '이 장소에 대한 댓글을 써주세요.';
+    commentButton.type = 'submit';
+    commentButton.textContent = '댓글 등록';
+    commentForm.append(commentInput, commentButton);
+    reactions.append(likeButton, dislikeButton);
+    content.append(title, reactions, commentsTitle, commentsList, commentForm);
+    commentForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const text = commentInput.value.trim();
+      if (!text) return;
+      place.comments.push({ id:createId('comment'), text, createdAt:new Date().toISOString() });
+      savePlaces();
+      openPlaceDetail(place, marker);
     });
+    infoWindow.setContent(content);
+    infoWindow.open({ map, anchor:marker });
+
+    function createReactionButton(icon, label, count, reactionKey) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `reaction-button ${reactionKey}`;
+      button.textContent = `${icon} ${label} ${count}`;
+      button.addEventListener('click', () => {
+        place.reactions[reactionKey] += 1;
+        savePlaces();
+        openPlaceDetail(place, marker);
+      });
+      return button;
+    }
   }
 
   function openModal(latlng, suggestedPlaceName = '', placeId = null) {
@@ -266,6 +308,11 @@
     map.setZoom(region.searchResultZoom);
     if (searchMarker) searchMarker.setMap(null);
     searchMarker = new google.maps.Marker({ position:location, map, title:result.name });
+    const savedPlace = places.find(place => place.placeId === result.placeId);
+    if (savedPlace) {
+      openPlaceDetail(savedPlace, searchMarker);
+      return;
+    }
     const content = document.createElement('div');
     const title = document.createElement('h3');
     const address = document.createElement('p');
@@ -277,7 +324,7 @@
     title.textContent = result.name;
     address.textContent = result.address;
     addButton.type = 'button';
-    addButton.textContent = '이 위치에 의견 핀 등록하기';
+    addButton.textContent = '이 장소를 내 지도에 추가하기';
     addButton.addEventListener('click', () => openModal(location, result.name, result.placeId));
     content.append(title, address, addButton);
     infoWindow.setContent(content);
@@ -293,35 +340,32 @@
   pinForm.addEventListener('submit', event => {
     event.preventDefault();
     if (!selectedLatLng) return;
-    const formData = new FormData(pinForm);
-    const opinionItem = {
-      id:crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-opinion`,
-      text:opinion.value.trim(),
-      category:formData.get('category'),
-      createdAt:new Date().toISOString()
-    };
     const existingPlace = selectedPlaceId ? places.find(place => place.placeId === selectedPlaceId) : null;
+    const firstComment = opinion.value.trim();
+    let savedPlace = existingPlace;
     if (existingPlace) {
       existingPlace.placeName = document.querySelector('#placeName').value.trim();
       existingPlace.lat = selectedLatLng.lat;
       existingPlace.lng = selectedLatLng.lng;
-      existingPlace.opinions.push(opinionItem);
+      if (firstComment) existingPlace.comments.push({ id:createId('comment'), text:firstComment, createdAt:new Date().toISOString() });
     } else {
-      places.push({
-        id:crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+      savedPlace = {
+        id:createId(),
         placeId:selectedPlaceId,
         lat:selectedLatLng.lat,
         lng:selectedLatLng.lng,
         placeName:document.querySelector('#placeName').value.trim(),
-        opinions:[opinionItem]
-      });
+        reactions:{ like:0, dislike:0 },
+        comments:firstComment ? [{ id:createId('comment'), text:firstComment, createdAt:new Date().toISOString() }] : []
+      };
+      places.push(savedPlace);
     }
     savePlaces();
-    activeCategory = '전체';
-    setActiveFilter();
     renderPins();
     closeModal();
-    showToast('지도에 의견 핀이 등록되었어요!');
+    const savedMarker = pinMarkers.find(marker => marker.placeRecordId === savedPlace?.id);
+    if (savedPlace && savedMarker) openPlaceDetail(savedPlace, savedMarker);
+    showToast('지도에 장소가 추가되었어요!');
   });
 
   opinion.addEventListener('input', () => { document.querySelector('#charCount').textContent = opinion.value.length; });
@@ -344,12 +388,6 @@
     clearTimeout(searchTimer);
     searchController?.abort();
   });
-  document.querySelector('#showAllButton').addEventListener('click', () => selectCategory('전체'));
-  document.querySelectorAll('.category-filter').forEach(button => button.addEventListener('click', () => selectCategory(button.dataset.category)));
-
-  function selectCategory(category) { activeCategory = category; setActiveFilter(); renderPins(); }
-  function setActiveFilter() { document.querySelectorAll('.category-filter').forEach(button => button.classList.toggle('active', button.dataset.category === activeCategory)); }
-
   renderPins();
 })().catch(error => {
   console.error(error);

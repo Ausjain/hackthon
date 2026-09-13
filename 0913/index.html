@@ -16,13 +16,13 @@
           <span><strong id="brandTitle">한마디 지도</strong><small id="brandSubtitle">우리 동네를 더 좋은 곳으로</small></span>
         </a>
         <div class="topbar-actions">
-          <span class="count-badge"><b id="pinCount">0</b>개의 이야기</span>
+          <span class="count-badge"><b id="pinCount">0</b>개의 장소</span>
           <button class="help-button" id="helpButton" type="button">사용 방법</button>
         </div>
       </header>
 
       <main class="main-layout">
-        <aside class="sidebar" aria-label="지도 안내와 분류">
+        <aside class="sidebar" aria-label="지도 사용 안내">
           <section class="intro-card">
             <span class="eyebrow" id="regionEnglishName">LOCAL VOICE MAP</span>
             <h1><span id="regionHeading">우리 지역</span>의 장소에<br /><em>여러분의 생각</em>을 남겨주세요.</h1>
@@ -33,19 +33,13 @@
             </div>
             <div class="how-to">
               <span class="step-number">2</span>
-              <div><strong>의견을 작성하고 등록</strong><small>장소 이름과 생각을 적으면 끝!</small></div>
+              <div><strong>장소를 추가하고 이야기 나누기</strong><small>반응을 누르거나 댓글을 남겨요</small></div>
             </div>
           </section>
 
-          <section class="category-card">
-            <div class="section-heading"><h2>분류별 보기</h2><button id="showAllButton" type="button">전체 보기</button></div>
-            <div class="category-list" id="categoryList">
-              <button class="category-filter active" data-category="전체" type="button"><span class="category-icon all">●</span><span>전체 의견</span><b id="allCount">0</b></button>
-              <button class="category-filter" data-category="좋아요" type="button"><span class="category-icon like">♥</span><span>좋아요</span><b id="likeCount">0</b></button>
-              <button class="category-filter" data-category="불편해요" type="button"><span class="category-icon inconvenient">!</span><span>불편해요</span><b id="inconvenientCount">0</b></button>
-              <button class="category-filter" data-category="추천해요" type="button"><span class="category-icon recommend">★</span><span>추천해요</span><b id="recommendCount">0</b></button>
-              <button class="category-filter" data-category="바뀌었으면 해요" type="button"><span class="category-icon change">↻</span><span>바뀌었으면 해요</span><b id="changeCount">0</b></button>
-            </div>
+          <section class="simple-guide">
+            <span aria-hidden="true">💬</span>
+            <p><strong>핀을 눌러보세요!</strong><small>좋아요·불편해요 반응과 댓글을 남길 수 있어요.</small></p>
           </section>
         </aside>
 
@@ -70,20 +64,14 @@
 
     <div class="modal-backdrop" id="pinModal" hidden>
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
-        <header class="modal-header"><div><span class="eyebrow">NEW PLACE STORY</span><h2 id="modalTitle">이 장소에 대한 의견</h2></div><button class="close-button" id="closeModalButton" type="button" aria-label="닫기">×</button></header>
+        <header class="modal-header"><div><span class="eyebrow">NEW PLACE</span><h2 id="modalTitle">새 장소 추가</h2></div><button class="close-button" id="closeModalButton" type="button" aria-label="닫기">×</button></header>
         <form id="pinForm">
           <div class="modal-body">
             <div class="selected-location"><span>📍</span><div><small>선택한 위치</small><strong id="selectedCoordinates"></strong></div></div>
             <label class="form-field"><span>장소 이름 <b>*</b></span><input id="placeName" maxlength="40" required placeholder="예: 불광천 산책로" autocomplete="off" /></label>
-            <fieldset class="form-field"><legend>분류 <b>*</b></legend><div class="category-options">
-              <label><input type="radio" name="category" value="좋아요" required /><span><i class="category-icon like">♥</i>좋아요</span></label>
-              <label><input type="radio" name="category" value="불편해요" /><span><i class="category-icon inconvenient">!</i>불편해요</span></label>
-              <label><input type="radio" name="category" value="추천해요" /><span><i class="category-icon recommend">★</i>추천해요</span></label>
-              <label><input type="radio" name="category" value="바뀌었으면 해요" /><span><i class="category-icon change">↻</i>바뀌었으면 해요</span></label>
-            </div></fieldset>
-            <label class="form-field"><span>나의 의견 <b>*</b></span><textarea id="opinion" maxlength="200" required placeholder="이 장소에 대해 어떤 생각을 갖고 있나요?"></textarea><small class="char-count"><b id="charCount">0</b> / 200</small></label>
+            <label class="form-field"><span>첫 댓글 <small>(선택)</small></span><textarea id="opinion" maxlength="200" placeholder="친구들에게 알려주고 싶은 내용을 적어보세요."></textarea><small class="char-count"><b id="charCount">0</b> / 200</small></label>
           </div>
-          <footer class="modal-footer"><button class="cancel-button" id="cancelButton" type="button">취소</button><button class="submit-button" type="submit">핀 등록하기 <span>→</span></button></footer>
+          <footer class="modal-footer"><button class="cancel-button" id="cancelButton" type="button">취소</button><button class="submit-button" type="submit">장소 추가하기 <span>→</span></button></footer>
         </form>
       </section>
     </div>
