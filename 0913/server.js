@@ -10,6 +10,14 @@ loadEnv(path.join(__dirname, '.env'));
 const PORT = Number(process.env.PORT) || 4173;
 const GOOGLE_PLACES_API_KEY = process.env.GOOGLE_PLACES_API_KEY || '';
 const GOOGLE_MAPS_BROWSER_KEY = process.env.GOOGLE_MAPS_BROWSER_KEY || '';
+const FIREBASE_CONFIG = {
+  apiKey:            process.env.FIREBASE_API_KEY || '',
+  authDomain:        process.env.FIREBASE_AUTH_DOMAIN || '',
+  projectId:         process.env.FIREBASE_PROJECT_ID || '',
+  storageBucket:     process.env.FIREBASE_STORAGE_BUCKET || '',
+  messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || '',
+  appId:             process.env.FIREBASE_APP_ID || ''
+};
 const GOOGLE_PLACES_URL = 'https://places.googleapis.com/v1/places:searchText';
 const MAX_BODY_BYTES = 8 * 1024;
 const mimeTypes = { '.html':'text/html; charset=utf-8', '.js':'text/javascript; charset=utf-8', '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8', '.svg':'image/svg+xml' };
@@ -104,7 +112,7 @@ function serveStatic(request, response) {
 }
 
 const server = http.createServer((request, response) => {
-  if (request.method === 'GET' && request.url === '/api/client-config') return sendJson(response, 200, { googleMapsBrowserKey:GOOGLE_MAPS_BROWSER_KEY });
+  if (request.method === 'GET' && request.url === '/api/client-config') return sendJson(response, 200, { googleMapsBrowserKey:GOOGLE_MAPS_BROWSER_KEY, firebaseConfig:FIREBASE_CONFIG });
   if (request.method === 'POST' && request.url === '/api/places/search-text') return searchPlaces(request, response);
   if (request.method === 'GET' || request.method === 'HEAD') return serveStatic(request, response);
   return sendJson(response, 405, { error:'Method not allowed' });

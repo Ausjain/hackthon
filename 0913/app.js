@@ -5,12 +5,35 @@
   if (!config?.region?.center || !config?.region?.bounds) throw new Error('config.js에 유효한 지역 설정이 필요합니다.');
   const { app: appConfig, region, map: mapConfig, search: searchConfig } = config;
   const STORAGE_KEY = `${appConfig.storageKeyPrefix}:${region.id}`;
+  const MIGRATED_KEY = `${STORAGE_KEY}:firestore-migrated`;
   const CLIENT_ID_STORAGE_KEY = 'place-voice-map-client-id-v1';
+  const FIRESTORE_COLLECTION = `${region.id}-places`;
   const interactionModel = window.INTERACTION_MODEL;
   const clientId = getOrCreateClientId();
 
+  // ── 클라이언트 설정 로딩 (Maps 키 + Firebase 설정) ──────────────────────
+  const clientConfigResponse = await fetch('/api/client-config');
+  if (!clientConfigResponse.ok) throw new Error('지도 설정을 불러오지 못했습니다.');
+  const clientConfigData = await clientConfigResponse.json();
+  const { googleMapsBrowserKey, firebaseConfig } = clientConfigData;
+  if (!googleMapsBrowserKey) throw new Error('.env에 GOOGLE_MAPS_BROWSER_KEY를 설정해 주세요.');
+  if (!firebaseConfig?.projectId) throw new Error('.env에 FIREBASE_PROJECT_ID 등 Firebase 설정을 추가해 주세요.');
+
+  // ── Firebase / Firestore 초기화 (CDN ESM) ───────────────────────────────
+  const { initializeApp } = await import('https://www.gstatic.com/firebasejs/11.4.0/firebase-app.js');
+  const {
+    getFirestore, collection, doc,
+    setDoc, onSnapshot, getDocs, runTransaction
+  } = await import('https://www.gstatic.com/firebasejs/11.4.0/firebase-firestore.js');
+
+  const firebaseApp = initializeApp(firebaseConfig);
+  const db = getFirestore(firebaseApp);
+  const placesCol = collection(db, FIRESTORE_COLLECTION);
+
   applyRegionConfig();
-  await loadGoogleMaps();
+
+  // ── Google Maps 로딩 ─────────────────────────────────────────────────────
+  await loadGoogleMaps(googleMapsBrowserKey);
 
   const map = new google.maps.Map(document.querySelector('#map'), {
     center: region.center,
@@ -25,26 +48,29 @@
     restriction: { latLngBounds:region.bounds, strictBounds:true }
   });
   const infoWindow = new google.maps.InfoWindow();
+  infoWindow.addListener('closeclick', () => { openedPlaceId = null; });
   const pinModal = document.querySelector('#pinModal');
   const pinForm = document.querySelector('#pinForm');
   const opinion = document.querySelector('#opinion');
   let selectedLatLng = null;
   let selectedPlaceId = null;
-  let places = loadPlaces();
+  let places = [];           // Firestore 실시간 구독으로 채워짐
   let pinMarkers = [];
   let searchMarker = null;
+  let openedPlaceId = null;
   let toastTimer;
   let searchTimer;
   let searchController;
   let lastSearchRequestAt = 0;
 
+  // ── 헬퍼 ─────────────────────────────────────────────────────────────────
   function getOrCreateClientId() {
-    let storedClientId = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
-    if (!storedClientId) {
-      storedClientId = crypto.randomUUID ? crypto.randomUUID() : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-      localStorage.setItem(CLIENT_ID_STORAGE_KEY, storedClientId);
+    let id = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    if (!id) {
+      id = crypto.randomUUID ? crypto.randomUUID() : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(CLIENT_ID_STORAGE_KEY, id);
     }
-    return storedClientId;
+    return id;
   }
 
   function applyRegionConfig() {
@@ -62,15 +88,11 @@
     document.querySelector('#mapStatusText').textContent = `${region.name} 안에서만 핀을 등록할 수 있어요`;
   }
 
-  async function loadGoogleMaps() {
-    const response = await fetch('/api/client-config');
-    if (!response.ok) throw new Error('지도 설정을 불러오지 못했습니다.');
-    const { googleMapsBrowserKey } = await response.json();
-    if (!googleMapsBrowserKey) throw new Error('.env에 GOOGLE_MAPS_BROWSER_KEY를 설정해 주세요.');
+  async function loadGoogleMaps(key) {
     await new Promise((resolve, reject) => {
       window.__initTravelMap = resolve;
       const script = document.createElement('script');
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(googleMapsBrowserKey)}&callback=__initTravelMap&v=weekly&language=${encodeURIComponent(searchConfig.language)}&region=${encodeURIComponent(searchConfig.regionCode)}`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&callback=__initTravelMap&v=weekly&language=${encodeURIComponent(searchConfig.language)}&region=${encodeURIComponent(searchConfig.regionCode)}`;
       script.async = true;
       script.onerror = () => reject(new Error('Google 지도를 불러오지 못했습니다.'));
       document.head.append(script);
@@ -78,37 +100,32 @@
     delete window.__initTravelMap;
   }
 
-  function loadPlaces() {
-    try {
-      let storedValue = localStorage.getItem(STORAGE_KEY);
-      if (storedValue === null) {
-        const legacyKeys = appConfig.legacyStorageKeysByRegion?.[region.id] || [];
-        const legacyKey = legacyKeys.find(key => localStorage.getItem(key) !== null);
-        storedValue = legacyKey ? localStorage.getItem(legacyKey) : '[]';
-        if (legacyKey) localStorage.setItem(STORAGE_KEY, storedValue);
-      }
-      const value = JSON.parse(storedValue || '[]');
-      if (!Array.isArray(value)) return [];
-      return value.map(place => normalizePlace(place));
-    } catch (_) { return []; }
+  function createId(suffix = '') {
+    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+    return suffix ? `${id}-${suffix}` : id;
   }
 
-  function normalizePlace(place) {
-    const oldOpinions = Array.isArray(place.opinions)
-      ? place.opinions
-      : [{ id:`${place.id}-opinion`, text:place.opinion || '', category:place.category, createdAt:place.createdAt || null }];
+  function insideRegion(position) {
+    const { lat, lng } = position;
+    return lat >= region.bounds.south && lat <= region.bounds.north && lng >= region.bounds.west && lng <= region.bounds.east;
+  }
+
+  function normalizePlace(data, id) {
+    const oldOpinions = Array.isArray(data.opinions)
+      ? data.opinions
+      : [{ id:`${id}-opinion`, text:data.opinion || '', category:data.category, createdAt:data.createdAt || null }];
     return interactionModel.ensurePlaceState({
-      id:place.id,
-      placeId:place.placeId || place.sourcePlaceId || null,
-      lat:place.lat,
-      lng:place.lng,
-      placeName:place.placeName,
-      reactions:place.reactions || {
+      id,
+      placeId:data.placeId || data.sourcePlaceId || null,
+      lat:data.lat,
+      lng:data.lng,
+      placeName:data.placeName,
+      reactions:data.reactions || {
         like:oldOpinions.filter(item => item.category === '좋아요').length,
         dislike:oldOpinions.filter(item => item.category === '불편해요').length
       },
-      reactionClients:place.reactionClients || {},
-      comments:Array.isArray(place.comments) ? place.comments : oldOpinions.filter(item => item.text?.trim()).map(item => ({
+      reactionClients:data.reactionClients || {},
+      comments:Array.isArray(data.comments) ? data.comments : oldOpinions.filter(item => item.text?.trim()).map(item => ({
         id:item.id,
         text:item.text.trim(),
         createdAt:item.createdAt || null
@@ -116,16 +133,107 @@
     });
   }
 
-  function savePlaces() { localStorage.setItem(STORAGE_KEY, JSON.stringify(places)); }
-  function createId(suffix = '') {
-    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
-    return suffix ? `${id}-${suffix}` : id;
-  }
-  function insideRegion(position) {
-    const { lat, lng } = position;
-    return lat >= region.bounds.south && lat <= region.bounds.north && lng >= region.bounds.west && lng <= region.bounds.east;
+  // ── Firestore 쓰기 ────────────────────────────────────────────────────────
+  function placeData(place) {
+    return {
+      placeId:place.placeId || null,
+      lat:Number(place.lat),
+      lng:Number(place.lng),
+      placeName:place.placeName,
+      reactions:place.reactions,
+      reactionClients:place.reactionClients,
+      comments:place.comments
+    };
   }
 
+  async function savePlace(place) {
+    try {
+      await setDoc(doc(placesCol, place.id), placeData(place));
+      return true;
+    } catch (err) {
+      console.error('Firestore 저장 실패:', err);
+      showToast('저장 중 오류가 발생했습니다.');
+      return false;
+    }
+  }
+
+  async function updatePlaceInteraction(placeId, mutate) {
+    try {
+      let result;
+      await runTransaction(db, async transaction => {
+        const reference = doc(placesCol, placeId);
+        const snapshot = await transaction.get(reference);
+        if (!snapshot.exists()) throw new Error('장소를 찾을 수 없습니다.');
+        const freshPlace = normalizePlace(snapshot.data(), snapshot.id);
+        result = mutate(freshPlace);
+        if (result?.changed === false || result?.ok === false) return;
+        transaction.update(reference, {
+          reactions:freshPlace.reactions,
+          reactionClients:freshPlace.reactionClients,
+          comments:freshPlace.comments
+        });
+      });
+      return result;
+    } catch (err) {
+      console.error('Firestore 상호작용 저장 실패:', err);
+      showToast('저장 중 오류가 발생했습니다.');
+      return { ok:false, changed:false, reason:'error' };
+    }
+  }
+
+  // ── localStorage → Firestore 마이그레이션 (최초 1회) ──────────────────────
+  async function migrateLocalStorageIfNeeded() {
+    if (localStorage.getItem(MIGRATED_KEY)) return;   // 이미 이전 완료
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) { localStorage.setItem(MIGRATED_KEY, '1'); return; }
+    let localPlaces;
+    try { localPlaces = JSON.parse(raw); } catch (_) { localStorage.setItem(MIGRATED_KEY, '1'); return; }
+    if (!Array.isArray(localPlaces) || localPlaces.length === 0) { localStorage.setItem(MIGRATED_KEY, '1'); return; }
+
+    const snapshot = await getDocs(placesCol);
+    const remotePlaces = snapshot.docs.map(item => normalizePlace(item.data(), item.id));
+    try {
+      for (const rawPlace of localPlaces) {
+        const localPlace = normalizePlace(rawPlace, rawPlace.id || createId());
+        const matchingRemote = remotePlaces.find(remote =>
+          (localPlace.placeId && remote.placeId === localPlace.placeId) || remote.id === localPlace.id
+        );
+        const targetId = matchingRemote?.id || localPlace.id;
+        await runTransaction(db, async transaction => {
+          const reference = doc(placesCol, targetId);
+          const currentSnapshot = await transaction.get(reference);
+          if (!currentSnapshot.exists()) {
+            transaction.set(reference, placeData({ ...localPlace, id:targetId }));
+            return;
+          }
+          const current = normalizePlace(currentSnapshot.data(), targetId);
+          const knownComments = new Set(current.comments.map(comment =>
+            comment.id || `${comment.clientId || ''}:${interactionModel.normalizeCommentText(comment.text)}`
+          ));
+          localPlace.comments.forEach(comment => {
+            const key = comment.id || `${comment.clientId || ''}:${interactionModel.normalizeCommentText(comment.text)}`;
+            if (!knownComments.has(key)) {
+              current.comments.push(comment);
+              knownComments.add(key);
+            }
+          });
+          Object.entries(localPlace.reactionClients).forEach(([ownerId, reaction]) => {
+            if (!current.reactionClients[ownerId] && ['like', 'dislike'].includes(reaction)) {
+              current.reactionClients[ownerId] = reaction;
+              current.reactions[reaction] += 1;
+            }
+          });
+          transaction.set(reference, placeData(current));
+        });
+      }
+      localStorage.setItem(MIGRATED_KEY, '1');
+      showToast('기존 데이터를 공유 지도로 옮겼어요!');
+    } catch (err) {
+      console.error('마이그레이션 실패:', err);
+    }
+  }
+
+  // ── 핀 렌더링 ─────────────────────────────────────────────────────────────
   function markerOptions(place) {
     return {
       position: { lat:Number(place.lat), lng:Number(place.lng) },
@@ -152,7 +260,9 @@
     document.querySelector('#pinCount').textContent = places.length;
   }
 
+  // ── 장소 상세 팝업 ────────────────────────────────────────────────────────
   function openPlaceDetail(place, marker) {
+    openedPlaceId = place.id;
     const content = document.createElement('div');
     const title = document.createElement('h3');
     const reactions = document.createElement('div');
@@ -182,12 +292,11 @@
           deleteButton.type = 'button';
           deleteButton.className = 'comment-delete';
           deleteButton.textContent = '삭제';
-          deleteButton.addEventListener('click', () => {
+          deleteButton.addEventListener('click', async () => {
             if (!window.confirm('이 댓글을 삭제할까요?')) return;
-            if (interactionModel.deleteOwnComment(place, comment.id, clientId)) {
-              savePlaces();
-              openPlaceDetail(place, marker);
-            }
+            await updatePlaceInteraction(place.id, freshPlace => ({
+              ok:interactionModel.deleteOwnComment(freshPlace, comment.id, clientId)
+            }));
           });
           item.append(deleteButton);
         }
@@ -209,22 +318,20 @@
     commentForm.append(commentInput, commentButton);
     reactions.append(likeButton, dislikeButton);
     content.append(title, reactions, commentsTitle, commentsList, commentForm);
-    commentForm.addEventListener('submit', event => {
+    commentForm.addEventListener('submit', async event => {
       event.preventDefault();
       const text = commentInput.value.trim();
       if (!text) return;
-      const result = interactionModel.addComment(place, {
+      const result = await updatePlaceInteraction(place.id, freshPlace => interactionModel.addComment(freshPlace, {
         id:createId('comment'),
         text,
         clientId,
         createdAt:new Date().toISOString()
-      });
+      }));
       if (!result.ok && result.reason === 'duplicate') {
         showToast('같은 댓글은 한 번만 등록할 수 있어요.');
         return;
       }
-      savePlaces();
-      openPlaceDetail(place, marker);
     });
     infoWindow.setContent(content);
     infoWindow.open({ map, anchor:marker });
@@ -236,23 +343,18 @@
       button.className = `reaction-button ${reactionKey}${selected ? ' selected' : ''}`;
       button.setAttribute('aria-pressed', String(selected));
       button.textContent = `${icon} ${label} ${count}`;
-      button.addEventListener('click', () => {
-        interactionModel.toggleReaction(place, clientId, reactionKey);
-        savePlaces();
-        openPlaceDetail(place, marker);
+      button.addEventListener('click', async () => {
+        await updatePlaceInteraction(place.id, freshPlace => interactionModel.toggleReaction(freshPlace, clientId, reactionKey));
       });
-      button.addEventListener('contextmenu', event => {
+      button.addEventListener('contextmenu', async event => {
         event.preventDefault();
-        const result = interactionModel.toggleReaction(place, clientId, reactionKey, true);
-        if (result.changed) {
-          savePlaces();
-          openPlaceDetail(place, marker);
-        }
+        await updatePlaceInteraction(place.id, freshPlace => interactionModel.toggleReaction(freshPlace, clientId, reactionKey, true));
       });
       return button;
     }
   }
 
+  // ── 핀 추가 모달 ──────────────────────────────────────────────────────────
   function openModal(latlng, suggestedPlaceName = '', placeId = null) {
     selectedLatLng = latlng;
     selectedPlaceId = placeId;
@@ -280,6 +382,7 @@
     toastTimer = setTimeout(() => toast.classList.remove('visible'), 2200);
   }
 
+  // ── 검색 ─────────────────────────────────────────────────────────────────
   function renderSearchResults(results, message = '') {
     const container = document.querySelector('#searchResults');
     container.replaceChildren();
@@ -349,6 +452,7 @@
   }
 
   function selectSearchResult(result) {
+    openedPlaceId = null;
     const location = { lat:Number(result.lat), lng:Number(result.lng) };
     if (!insideRegion(location)) return showToast(`${region.name} 밖의 장소는 선택할 수 없어요.`);
     document.querySelector('#searchResults').hidden = true;
@@ -379,18 +483,20 @@
     infoWindow.open({ map, anchor:searchMarker });
   }
 
+  // ── 지도 / 폼 이벤트 ─────────────────────────────────────────────────────
   map.addListener('click', event => {
+    openedPlaceId = null;
     const location = event.latLng.toJSON();
     if (!insideRegion(location)) return showToast(`${region.name} 안의 장소를 선택해 주세요.`);
     openModal(location);
   });
 
-  pinForm.addEventListener('submit', event => {
+  pinForm.addEventListener('submit', async event => {
     event.preventDefault();
     if (!selectedLatLng) return;
-    const existingPlace = selectedPlaceId ? places.find(place => place.placeId === selectedPlaceId) : null;
     const firstComment = opinion.value.trim();
-    let savedPlace = existingPlace;
+    const existingPlace = selectedPlaceId ? places.find(place => place.placeId === selectedPlaceId) : null;
+
     if (existingPlace) {
       existingPlace.placeName = document.querySelector('#placeName').value.trim();
       existingPlace.lat = selectedLatLng.lat;
@@ -398,25 +504,26 @@
       if (firstComment) {
         interactionModel.addComment(existingPlace, { id:createId('comment'), text:firstComment, clientId, createdAt:new Date().toISOString() });
       }
+      const saved = await savePlace(existingPlace);
+      if (!saved) return;
+      closeModal();
+      showToast('장소가 업데이트되었어요!');
     } else {
-      savedPlace = {
-        id:createId(),
-        placeId:selectedPlaceId,
-        lat:selectedLatLng.lat,
-        lng:selectedLatLng.lng,
-        placeName:document.querySelector('#placeName').value.trim(),
-        reactions:{ like:0, dislike:0 },
-        reactionClients:{},
-        comments:firstComment ? [{ id:createId('comment'), text:firstComment, clientId, createdAt:new Date().toISOString() }] : []
+      const newPlace = {
+        id: createId(),
+        placeId: selectedPlaceId,
+        lat: selectedLatLng.lat,
+        lng: selectedLatLng.lng,
+        placeName: document.querySelector('#placeName').value.trim(),
+        reactions: { like:0, dislike:0 },
+        reactionClients: {},
+        comments: firstComment ? [{ id:createId('comment'), text:firstComment, clientId, createdAt:new Date().toISOString() }] : []
       };
-      places.push(savedPlace);
+      const saved = await savePlace(newPlace);
+      if (!saved) return;
+      closeModal();
+      showToast('지도에 장소가 추가되었어요!');
     }
-    savePlaces();
-    renderPins();
-    closeModal();
-    const savedMarker = pinMarkers.find(marker => marker.placeRecordId === savedPlace?.id);
-    if (savedPlace && savedMarker) openPlaceDetail(savedPlace, savedMarker);
-    showToast('지도에 장소가 추가되었어요!');
   });
 
   opinion.addEventListener('input', () => { document.querySelector('#charCount').textContent = opinion.value.length; });
@@ -439,9 +546,26 @@
     clearTimeout(searchTimer);
     searchController?.abort();
   });
-  renderPins();
+
+  // ── localStorage 마이그레이션 후 Firestore 실시간 구독 시작 ──────────────
+  await migrateLocalStorageIfNeeded();
+
+  onSnapshot(placesCol, snapshot => {
+    places = snapshot.docs.map(d => normalizePlace(d.data(), d.id));
+    renderPins();
+
+    if (openedPlaceId && infoWindow.getMap()) {
+      const freshPlace = places.find(place => place.id === openedPlaceId);
+      const freshMarker = pinMarkers.find(marker => marker.placeRecordId === openedPlaceId);
+      if (freshPlace && freshMarker) openPlaceDetail(freshPlace, freshMarker);
+    }
+  }, err => {
+    console.error('Firestore 구독 오류:', err);
+    showToast('실시간 연결에 문제가 생겼어요. 새로고침해 주세요.');
+  });
+
 })().catch(error => {
   console.error(error);
   const mapElement = document.querySelector('#map');
-  mapElement.innerHTML = `<div class="map-load-error"><strong>지도를 시작할 수 없습니다.</strong><span>${error.message}</span><small>.env 설정 후 npm start로 실행해 주세요.</small></div>`;
+  mapElement.innerHTML = `<div class="map-load-error"><strong>지도를 시작할 수 없습니다.</strong><span>${error.message}</span><small>로컬 .env 또는 Vercel 환경변수 설정을 확인해 주세요.</small></div>`;
 });

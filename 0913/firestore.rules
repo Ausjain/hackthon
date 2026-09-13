@@ -1,0 +1,40 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 장소 핀 컬렉션 (지역별: eunpyeong-gu-places 등)
+    match /{regionPlaces}/{placeId} {
+      function isPlacesCollection() {
+        return regionPlaces.matches('^[a-z0-9-]+-places$');
+      }
+
+      function isValidPlace() {
+        return request.resource.data.keys().hasAll([
+                 'placeId', 'placeName', 'lat', 'lng', 'reactions',
+                 'reactionClients', 'comments'
+               ])
+               && request.resource.data.placeName is string
+               && request.resource.data.placeName.size() >= 1
+               && request.resource.data.placeName.size() <= 40
+               && request.resource.data.lat is number
+               && request.resource.data.lng is number
+               && request.resource.data.reactions is map
+               && request.resource.data.reactionClients is map
+               && request.resource.data.comments is list
+               && request.resource.data.comments.size() <= 500;
+      }
+
+      // 누구나 읽기 가능
+      allow read: if isPlacesCollection();
+
+      // 장소 생성: 필수 필드가 있고 텍스트 길이 조건을 만족해야 함
+      allow create: if isPlacesCollection() && isValidPlace();
+
+      // 장소 수정: 생성과 동일 조건
+      allow update: if isPlacesCollection() && isValidPlace();
+
+      // 삭제는 허용하지 않음 (장소 삭제 기능 없음)
+      allow delete: if false;
+    }
+  }
+}
