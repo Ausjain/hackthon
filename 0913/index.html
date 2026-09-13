@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#fffaf2" />
-    <title>은평 한마디 지도</title>
+    <title>지역 한마디 지도</title>
     <link rel="preconnect" href="https://unpkg.com" />
     <link rel="preconnect" href="https://tile.openstreetmap.org" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
@@ -13,9 +13,9 @@
   <body>
     <div class="app-shell">
       <header class="topbar">
-        <a class="brand" href="#" aria-label="은평 한마디 지도 처음으로">
+        <a class="brand" href="#" id="brandLink" aria-label="한마디 지도 처음으로">
           <span class="brand-mark" aria-hidden="true">📍</span>
-          <span><strong>은평 한마디 지도</strong><small>우리 동네를 더 좋은 곳으로</small></span>
+          <span><strong id="brandTitle">한마디 지도</strong><small id="brandSubtitle">우리 동네를 더 좋은 곳으로</small></span>
         </a>
         <div class="topbar-actions">
           <span class="count-badge"><b id="pinCount">0</b>개의 이야기</span>
@@ -26,12 +26,12 @@
       <main class="main-layout">
         <aside class="sidebar" aria-label="지도 안내와 분류">
           <section class="intro-card">
-            <span class="eyebrow">EUNPYEONG VOICE MAP</span>
-            <h1>은평구의 장소에<br /><em>여러분의 생각</em>을 남겨주세요.</h1>
+            <span class="eyebrow" id="regionEnglishName">LOCAL VOICE MAP</span>
+            <h1><span id="regionHeading">우리 지역</span>의 장소에<br /><em>여러분의 생각</em>을 남겨주세요.</h1>
             <p>지도의 원하는 곳을 누르고, 그 장소에 대한 솔직한 의견을 공유해 보세요.</p>
             <div class="how-to">
               <span class="step-number">1</span>
-              <div><strong>지도에서 장소를 클릭</strong><small>은평구 안의 원하는 위치를 골라요</small></div>
+              <div><strong>지도에서 장소를 클릭</strong><small><span id="regionStepName">지역</span> 안의 원하는 위치를 골라요</small></div>
             </div>
             <div class="how-to">
               <span class="step-number">2</span>
@@ -51,21 +51,21 @@
           </section>
         </aside>
 
-        <section class="map-panel" aria-label="은평구 의견 지도">
+        <section class="map-panel" id="mapPanel" aria-label="지역 의견 지도">
           <div id="map"></div>
           <div class="place-search" id="placeSearch">
             <form class="search-form" id="searchForm" role="search">
               <span class="search-icon" aria-hidden="true">⌕</span>
-              <label class="sr-only" for="searchInput">은평구 장소 또는 주소 검색</label>
-              <input id="searchInput" type="search" minlength="2" maxlength="80" autocomplete="off" placeholder="은평구 장소명 또는 주소 검색" />
+              <label class="sr-only" id="searchLabel" for="searchInput">지역 장소 또는 주소 검색</label>
+              <input id="searchInput" type="search" minlength="2" maxlength="80" autocomplete="off" placeholder="장소명 또는 주소 검색" />
               <button class="search-clear" id="searchClearButton" type="button" aria-label="검색어 지우기" hidden>×</button>
               <button class="search-submit" type="submit">검색</button>
             </form>
             <div class="search-results" id="searchResults" hidden aria-live="polite"></div>
           </div>
           <div class="map-tip" id="mapTip"><span>＋</span><strong>지도를 클릭해 의견을 남겨보세요</strong><button type="button" aria-label="안내 닫기">×</button></div>
-          <button class="reset-view" id="resetViewButton" type="button" title="은평구 전체 보기" aria-label="은평구 전체 보기">⌖</button>
-          <div class="map-status"><span class="pulse-dot"></span>은평구 안에서만 핀을 등록할 수 있어요</div>
+          <button class="reset-view" id="resetViewButton" type="button" title="초기 위치로 이동" aria-label="초기 위치로 이동">⌖</button>
+          <div class="map-status"><span class="pulse-dot"></span><span id="mapStatusText">설정 지역 안에서만 핀을 등록할 수 있어요</span></div>
         </section>
       </main>
     </div>
@@ -93,6 +93,7 @@
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="config.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
