@@ -33,3 +33,14 @@ node server.js
 - `countryCode`: 지역 국가 코드
 
 핀과 의견은 `storageKeyPrefix + region.id`로 분리 저장됩니다. 카테고리, 의견 작성, 지도 검색 로직에는 특정 지역명이 포함되지 않습니다.
+
+## Vercel 배포
+
+Vercel 프로젝트의 **Root Directory**를 `0913`으로 지정합니다. 별도 Build Command와 Output Directory는 설정하지 않아도 됩니다.
+
+Vercel Project Settings의 Environment Variables에서 다음 값을 Preview와 Production 환경에 등록한 뒤 재배포합니다.
+
+- `GOOGLE_PLACES_API_KEY`: `api/places/search-text.js` 서버리스 함수에서만 사용
+- `GOOGLE_MAPS_BROWSER_KEY`: `api/client-config.js`를 통해 지도 로더에 전달
+
+Vercel에서는 `server.js`를 실행하지 않습니다. `/api/client-config`와 `/api/places/search-text` 경로는 `api/` 폴더의 Vercel Functions가 처리합니다. `server.js`는 로컬 실행 전용입니다.
