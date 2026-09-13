@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check app.js && node --check config.js && node --check server.js && node --check api/client-config.js && node --check api/places/search-text.js"
+    "check": "node --check app.js && node --check config.js && node --check interaction-model.js && node --check server.js && node --check api/client-config.js && node --check api/places/search-text.js"
   },
   "engines": { "node": ">=18" }
 }

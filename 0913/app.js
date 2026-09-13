@@ -5,6 +5,9 @@
   if (!config?.region?.center || !config?.region?.bounds) throw new Error('config.js에 유효한 지역 설정이 필요합니다.');
   const { app: appConfig, region, map: mapConfig, search: searchConfig } = config;
   const STORAGE_KEY = `${appConfig.storageKeyPrefix}:${region.id}`;
+  const CLIENT_ID_STORAGE_KEY = 'place-voice-map-client-id-v1';
+  const interactionModel = window.INTERACTION_MODEL;
+  const clientId = getOrCreateClientId();
 
   applyRegionConfig();
   await loadGoogleMaps();
@@ -34,6 +37,15 @@
   let searchTimer;
   let searchController;
   let lastSearchRequestAt = 0;
+
+  function getOrCreateClientId() {
+    let storedClientId = localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+    if (!storedClientId) {
+      storedClientId = crypto.randomUUID ? crypto.randomUUID() : `client-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      localStorage.setItem(CLIENT_ID_STORAGE_KEY, storedClientId);
+    }
+    return storedClientId;
+  }
 
   function applyRegionConfig() {
     const appTitle = `${region.name} ${appConfig.titleSuffix}`;
@@ -85,7 +97,7 @@
     const oldOpinions = Array.isArray(place.opinions)
       ? place.opinions
       : [{ id:`${place.id}-opinion`, text:place.opinion || '', category:place.category, createdAt:place.createdAt || null }];
-    return {
+    return interactionModel.ensurePlaceState({
       id:place.id,
       placeId:place.placeId || place.sourcePlaceId || null,
       lat:place.lat,
@@ -95,12 +107,13 @@
         like:oldOpinions.filter(item => item.category === '좋아요').length,
         dislike:oldOpinions.filter(item => item.category === '불편해요').length
       },
+      reactionClients:place.reactionClients || {},
       comments:Array.isArray(place.comments) ? place.comments : oldOpinions.filter(item => item.text?.trim()).map(item => ({
         id:item.id,
         text:item.text.trim(),
         createdAt:item.createdAt || null
       }))
-    };
+    });
   }
 
   function savePlaces() { localStorage.setItem(STORAGE_KEY, JSON.stringify(places)); }
@@ -159,9 +172,25 @@
     commentsList.className = 'comment-list';
     if (place.comments.length) {
       place.comments.forEach(comment => {
-        const item = document.createElement('p');
+        const item = document.createElement('div');
+        const text = document.createElement('p');
         item.className = 'comment-item';
-        item.textContent = comment.text;
+        text.textContent = comment.text;
+        item.append(text);
+        if (comment.clientId === clientId) {
+          const deleteButton = document.createElement('button');
+          deleteButton.type = 'button';
+          deleteButton.className = 'comment-delete';
+          deleteButton.textContent = '삭제';
+          deleteButton.addEventListener('click', () => {
+            if (!window.confirm('이 댓글을 삭제할까요?')) return;
+            if (interactionModel.deleteOwnComment(place, comment.id, clientId)) {
+              savePlaces();
+              openPlaceDetail(place, marker);
+            }
+          });
+          item.append(deleteButton);
+        }
         commentsList.append(item);
       });
     } else {
@@ -184,7 +213,16 @@
       event.preventDefault();
       const text = commentInput.value.trim();
       if (!text) return;
-      place.comments.push({ id:createId('comment'), text, createdAt:new Date().toISOString() });
+      const result = interactionModel.addComment(place, {
+        id:createId('comment'),
+        text,
+        clientId,
+        createdAt:new Date().toISOString()
+      });
+      if (!result.ok && result.reason === 'duplicate') {
+        showToast('같은 댓글은 한 번만 등록할 수 있어요.');
+        return;
+      }
       savePlaces();
       openPlaceDetail(place, marker);
     });
@@ -193,13 +231,23 @@
 
     function createReactionButton(icon, label, count, reactionKey) {
       const button = document.createElement('button');
+      const selected = place.reactionClients?.[clientId] === reactionKey;
       button.type = 'button';
-      button.className = `reaction-button ${reactionKey}`;
+      button.className = `reaction-button ${reactionKey}${selected ? ' selected' : ''}`;
+      button.setAttribute('aria-pressed', String(selected));
       button.textContent = `${icon} ${label} ${count}`;
       button.addEventListener('click', () => {
-        place.reactions[reactionKey] += 1;
+        interactionModel.toggleReaction(place, clientId, reactionKey);
         savePlaces();
         openPlaceDetail(place, marker);
+      });
+      button.addEventListener('contextmenu', event => {
+        event.preventDefault();
+        const result = interactionModel.toggleReaction(place, clientId, reactionKey, true);
+        if (result.changed) {
+          savePlaces();
+          openPlaceDetail(place, marker);
+        }
       });
       return button;
     }
@@ -347,7 +395,9 @@
       existingPlace.placeName = document.querySelector('#placeName').value.trim();
       existingPlace.lat = selectedLatLng.lat;
       existingPlace.lng = selectedLatLng.lng;
-      if (firstComment) existingPlace.comments.push({ id:createId('comment'), text:firstComment, createdAt:new Date().toISOString() });
+      if (firstComment) {
+        interactionModel.addComment(existingPlace, { id:createId('comment'), text:firstComment, clientId, createdAt:new Date().toISOString() });
+      }
     } else {
       savedPlace = {
         id:createId(),
@@ -356,7 +406,8 @@
         lng:selectedLatLng.lng,
         placeName:document.querySelector('#placeName').value.trim(),
         reactions:{ like:0, dislike:0 },
-        comments:firstComment ? [{ id:createId('comment'), text:firstComment, createdAt:new Date().toISOString() }] : []
+        reactionClients:{},
+        comments:firstComment ? [{ id:createId('comment'), text:firstComment, clientId, createdAt:new Date().toISOString() }] : []
       };
       places.push(savedPlace);
     }
